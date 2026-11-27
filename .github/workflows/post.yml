@@ -1,0 +1,43 @@
+# インスタに投稿するロボット
+# 毎日 8時・12時・22時（日本時間）の1時間のあいだ、10分ごとに投稿待ちの箱をのぞきます。
+# GitHubの時計は世界標準時なので、日本時間から9時間引いた 23時・3時・13時 を指定しています。
+name: インスタに投稿
+
+on:
+  schedule:
+    - cron: '*/10 23,3,13 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '試しモード（チェックを入れると投稿しない）'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: post
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 時間が来た投稿を出す
+        env:
+          IG_TOKEN: ${{ secrets.IG_TOKEN }}
+          DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && 'true' || (github.event_name == 'workflow_dispatch' && 'false') || vars.DRY_RUN || 'true' }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: bash bot/post_due.sh
+
+      - name: 投稿の記録を保存
+        if: always()
+        run: |
+          git config user.name "meigen-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/posted.txt
+          git diff --cached --quiet || (git commit -m "投稿の記録" && git push)
