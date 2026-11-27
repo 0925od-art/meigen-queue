@@ -1,0 +1,33 @@
+# インスタの合いカギ（60日で切れる）を、毎週月曜に自動で延長するロボット
+# GH_PAT（GitHubの合いカギ）が秘密の保管庫にあれば、新しい合いカギを自動で保存し直します。
+name: 合いカギの延長
+
+on:
+  schedule:
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 合いカギを延長する
+        env:
+          IG_TOKEN: ${{ secrets.IG_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          [ -n "$IG_TOKEN" ] || { echo "::error::IG_TOKEN が設定されていません"; exit 1; }
+          res=$(curl -sS -G "https://graph.instagram.com/refresh_access_token" \
+                --data-urlencode "grant_type=ig_refresh_token" \
+                --data-urlencode "access_token=$IG_TOKEN")
+          new=$(jq -r '.access_token // empty' <<<"$res")
+          [ -n "$new" ] || { echo "::error::延長に失敗：$(jq -c '.error // .' <<<"$res")"; exit 1; }
+          echo "::add-mask::$new"
+          days=$(( $(jq -r '.expires_in' <<<"$res") / 86400 ))
+          if [ -n "$GH_TOKEN" ]; then
+            gh secret set IG_TOKEN --body "$new" --repo "$REPO"
+            echo "合いカギを延長しました（あと${days}日有効）"
+          else
+            echo "::warning::GH_PAT がないので、新しい合いカギを保存できませんでした"
+          fi
